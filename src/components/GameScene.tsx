@@ -12,6 +12,49 @@ import { Sphere, Grid, Trail, Sparkles } from '@react-three/drei';
 
 const localCollectedOrbs = new Set<string>();
 
+function OrbCollectionBurst({ x, y, color, onComplete }: { x: number, y: number, color: string, onComplete: () => void }) {
+  const group = useRef<THREE.Group>(null);
+  const meshRef = useRef<THREE.Mesh>(null);
+  const startTime = useMemo(() => Date.now(), []);
+  
+  useFrame(() => {
+    if (!group.current || !meshRef.current) return;
+    const elapsed = (Date.now() - startTime) / 1000;
+    const duration = 0.5;
+    const t = Math.min(elapsed / duration, 1);
+    
+    if (t >= 1) {
+      onComplete();
+      return;
+    }
+
+    // Explode outward
+    const scale = 1 + t * 4;
+    group.current.scale.setScalar(scale);
+    
+    // Fade out
+    if (meshRef.current.material instanceof THREE.MeshBasicMaterial) {
+      meshRef.current.material.opacity = (1 - t) * 0.8;
+    }
+  });
+
+  return (
+    <group ref={group} position={[x, y, 0.5]}>
+      <Sparkles
+        count={12}
+        scale={0.5}
+        size={2}
+        speed={4}
+        color={color}
+      />
+      <mesh ref={meshRef}>
+        <sphereGeometry args={[0.4, 8, 8]} />
+        <meshBasicMaterial color={color} transparent opacity={0.8} toneMapped={false} />
+      </mesh>
+    </group>
+  );
+}
+
 function BoostTrail({ playerId, color }: { playerId: string, color: string }) {
   const sparklesGroup = useRef<THREE.Group>(null);
   const afterImageRef = useRef<THREE.InstancedMesh>(null);
@@ -199,16 +242,24 @@ function Orbs() {
   const dummy = useMemo(() => new THREE.Object3D(), []);
   const colorObj = useMemo(() => new THREE.Color(), []);
 
-  useFrame(() => {
+  useFrame((state) => {
     if (!meshRef.current) return;
     const gs = globalGameState.current;
     if (!gs) return;
 
+    const time = state.clock.getElapsedTime();
     let i = 0;
     for (const orbId in gs.orbs) {
       if (localCollectedOrbs.has(orbId)) continue;
       const orb = gs.orbs[orbId];
-      dummy.position.set(orb.x, orb.y, 0.5);
+      
+      // Add subtle float and pulse animation
+      const phase = (orb.x * 0.5 + orb.y * 0.5);
+      const floatY = Math.sin(time * 2 + phase) * 0.2;
+      const scale = 0.8 + Math.sin(time * 3 + phase) * 0.2;
+      
+      dummy.position.set(orb.x, orb.y + floatY, 0.5);
+      dummy.scale.setScalar(scale);
       dummy.updateMatrix();
       meshRef.current.setMatrixAt(i, dummy.matrix);
       colorObj.set(orb.color);
@@ -249,6 +300,7 @@ export function GameScene() {
   const inputs = useRef({ left: false, right: false, boost: false });
   const lightRef = useRef<THREE.DirectionalLight>(null);
   const [lightTarget] = useState(() => new THREE.Object3D());
+  const [bursts, setBursts] = useState<{ id: string, x: number, y: number, color: string }[]>([]);
 
   const localPlayerRef = useRef<{
     active: boolean;
@@ -353,6 +405,11 @@ export function GameScene() {
         if (dx * dx + dy * dy < 4) {
           localPlayerRef.current.score += orb.value;
           localCollectedOrbs.add(orbId);
+          
+          // Trigger collection effect
+          const burstId = `${orbId}-${Date.now()}`;
+          setBursts(prev => [...prev, { id: burstId, x: orb.x, y: orb.y, color: orb.color }]);
+          
           delete gs.orbs[orbId]; // predict locally
           sendCollectOrb(orbId);
         }
@@ -474,6 +531,18 @@ export function GameScene() {
       />
 
       <Orbs />
+
+      {bursts.map(burst => (
+        <OrbCollectionBurst
+          key={burst.id}
+          x={burst.x}
+          y={burst.y}
+          color={burst.color}
+          onComplete={() => {
+            setBursts(prev => prev.filter(b => b.id !== burst.id));
+          }}
+        />
+      ))}
 
       {Object.values(gameState.players).map((player) => {
         if (player.state !== 'alive' || player.segments.length === 0) return null;
