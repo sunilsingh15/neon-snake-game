@@ -22,6 +22,8 @@ import {
   TURN_SPEED,
 } from './src/shared/types.ts';
 
+import path from 'path';
+
 const app = express();
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
@@ -30,7 +32,7 @@ const io = new Server(httpServer, {
   },
 });
 
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
 const COLORS = [
   '#ff7eb3', // vibrant pink
@@ -178,7 +180,11 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    app.use(express.static('dist'));
+    const distPath = path.join(process.cwd(), 'dist');
+    app.use(express.static(distPath));
+    app.get('*', (req, res) => {
+      res.sendFile(path.join(distPath, 'index.html'));
+    });
   }
 
   httpServer.listen(PORT, '0.0.0.0', () => {
